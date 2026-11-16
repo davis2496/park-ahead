@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Park Ahead — London parking before you set off</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --ink:#14202b; --muted:#5b6876; --line:#dfe4ea; --bg:#f4f5f2; --card:#fff;
+  --blue:#0a56a8; --blue-d:#073f7c; --yellow:#f6c700;
+  --ok:#1b8a4b; --ok-bg:#e6f4ec; --warn:#b36b00; --warn-bg:#fdf1d9; --no:#c22f2f; --no-bg:#fbe6e6; --unk:#6b7785; --unk-bg:#eceff2;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+button,input,select{font:inherit;color:inherit}
+a{color:var(--blue)}
+.app{display:grid;grid-template-columns:440px 1fr;height:100vh}
+.panel{display:flex;flex-direction:column;min-height:0;background:var(--bg);border-right:1px solid var(--line)}
+#map{height:100%;min-height:0;background:#e9ecef}
+header{background:var(--blue);color:#fff;padding:14px 16px 16px;border-bottom:4px solid var(--yellow)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.brand .p{width:30px;height:30px;border-radius:6px;background:#fff;color:var(--blue);font-weight:800;font-size:20px;display:grid;place-items:center}
+.brand h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+.brand span{font-size:12.5px;opacity:.85;display:block;font-weight:400}
+.search{display:flex;gap:6px;position:relative}
+.search input{flex:1;min-width:0;padding:10px 12px;border:0;border-radius:8px;color:var(--ink)}
+.search button{border:0;border-radius:8px;padding:0 14px;background:var(--yellow);color:#1a1a1a;font-weight:700;cursor:pointer}
+.search button.geo{background:rgba(255,255,255,.18);color:#fff;padding:0 11px;font-size:17px}
+.search button:hover{filter:brightness(1.06)}
+.sugg{position:absolute;top:44px;left:0;right:0;background:#fff;color:var(--ink);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:2000;overflow:hidden}
+.sugg button{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13.5px}
+.sugg button:last-child{border-bottom:0}.sugg button:hover{background:#eef4fb}
+.opts{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:6px;margin-top:8px}
+.opts label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;opacity:.85;display:block}
+.opts input,.opts select{width:100%;margin-top:2px;padding:7px 8px;border:0;border-radius:6px;color:var(--ink);background:#fff;font-size:13.5px}
+.body{flex:1;overflow:auto;padding:12px 14px 30px}
+.empty{color:var(--muted);padding:18px 6px}
+.empty h2{color:var(--ink);font-size:17px;margin:0 0 6px}
+.empty .ex{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:13px}
+.chip:hover{border-color:var(--blue);color:var(--blue)}
+.verdict{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--blue);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.verdict h2{font-size:15.5px;margin:0 0 2px}
+.verdict .where{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.verdict ul{margin:0;padding:0;list-style:none}
+.verdict li{padding:4px 0 4px 24px;position:relative;font-size:14px}
+.verdict li::before{content:"";position:absolute;left:4px;top:10px;width:10px;height:10px;border-radius:50%;background:var(--unk)}
+.verdict li.ok::before{background:var(--ok)}.verdict li.warn::before{background:var(--warn)}.verdict li.no::before{background:var(--no)}
+.tabs{display:flex;gap:4px;margin:12px 0 10px;background:#e6e9ec;border-radius:9px;padding:3px}
+.tabs button{flex:1;border:0;background:none;border-radius:7px;padding:7px 4px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--muted)}
+.tabs button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:8px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.card:hover,.card.hl{border-color:var(--blue);box-shadow:0 2px 10px rgba(10,86,168,.13)}
+.card .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.card h3{margin:0;font-size:14.5px}
+.card .dist{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.badge{display:inline-block;font-size:12.5px;font-weight:600;border-radius:6px;padding:2px 8px;margin-top:6px}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}.badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.no{background:var(--no-bg);color:var(--no)}.badge.unknown{background:var(--unk-bg);color:var(--unk)}
+.facts{margin:7px 0 0;padding:0;list-style:none;font-size:13px;color:#3b4855}
+.facts li{padding:1px 0}
+.facts b{font-weight:600;color:var(--ink)}
+.side{margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
+.side:first-of-type{border-top:0;padding-top:0}
+.side .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.links{margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;font-size:13px}
+.note{font-size:12.5px;color:var(--muted);background:#fff;border:1px dashed #c9d0d8;border-radius:8px;padding:9px 11px;margin:8px 0}
+.rule{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:8px}
+.rule h3{margin:0 0 4px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+.rule p{margin:4px 0;font-size:13.5px;color:#3b4855}
+.sw{display:inline-block;width:26px;height:10px;border-radius:2px;flex:none}
+.sw.dy{background:linear-gradient(var(--yellow) 35%,transparent 35%,transparent 65%,var(--yellow) 65%)}
+.sw.sy{background:linear-gradient(transparent 35%,var(--yellow) 35%,var(--yellow) 65%,transparent 65%)}
+.sw.dr{background:linear-gradient(#d22 35%,transparent 35%,transparent 65%,#d22 65%)}
+.sw.bay{border:2px dashed #888;height:12px}
+.loading{padding:26px 8px;color:var(--muted);text-align:center}
+.spin{width:26px;height:26px;border:3px solid #cfd6dd;border-top-color:var(--blue);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.err{background:var(--no-bg);color:#7a1d1d;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:13.5px}
+.pm{width:26px;height:26px;border-radius:6px;color:#fff;font-weight:800;display:grid;place-items:center;font-size:15px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.pm.ok{background:var(--blue)}.pm.warn{background:var(--warn)}.pm.no{background:var(--no)}.pm.unknown{background:var(--unk)}
+.dest{width:18px;height:18px;border-radius:50%;background:#111;border:3px solid var(--yellow);box-shadow:0 1px 5px rgba(0,0,0,.5)}
+.legend{background:#fff;padding:8px 10px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.25);font-size:12px;line-height:1.7}
+.legend i{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.leaflet-popup-content{margin:10px 12px;font:13px/1.4 system-ui,sans-serif}
+.leaflet-popup-content b{font-size:13.5px}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto 42vh;height:auto;min-height:100vh}
+  .panel{border-right:0;order:1}.body{overflow:visible}
+  #map{order:0;height:42vh;position:sticky;top:0;z-index:5}
+  .app{display:flex;flex-direction:column}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="panel">
+    <header>
+      <div class="brand"><div class="p">P</div><h1>Park Ahead<span>Know your London parking options before you set off</span></h1></div>
+      <form class="search" id="form" autocomplete="off">
+        <input id="q" placeholder="Where are you going? Address, place or postcode" aria-label="Destination">
+        <button type="button" class="geo" id="geo" title="Use my current location" aria-label="Use my location">⌖</button>
+        <button type="submit">Check</button>
+        <div class="sugg" id="sugg" hidden></div>
+      </form>
+      <div class="opts">
+        <div><label for="when">Arriving</label><input type="datetime-local" id="when"></div>
+        <div><label for="stay">Staying</label>
+          <select id="stay"><option value="30">30 min</option><option value="60">1 hour</option><option value="120" selected>2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="480">8 hours</option><option value="720">12 hours</option></select></div>
+        <div><label for="rad">Walk up to</label>
+          <select id="rad"><option value="250">3 min</option><option value="400" selected>5 min</option><option value="650">8 min</option><option value="1000">12 min</option></select></div>
+      </div>
+    </header>
+    <div class="body" id="body"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const LONDON = {s:51.28, n:51.70, w:-0.52, e:0.34};
+const inLondon = (lat, lon) => lat > LONDON.s && lat < LONDON.n && lon > LONDON.w && lon < LONDON.e;
+function dist(a, b){ // metres
+  const R = 6371000, p = Math.PI/180, dLat = (b[0]-a[0])*p, dLon = (b[1]-a[1])*p;
+  const x = Math.sin(dLat/2)**2 + Math.cos(a[0]*p)*Math.cos(b[0]*p)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+const walk = m => Math.max(1, Math.round(m/80));
+const distLabel = m => `${m < 1000 ? Math.round(m/10)*10 + ' m' : (m/1000).toFixed(1) + ' km'} · ${walk(m)} min walk`;
+const title = s => s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : s;
+
+/* ---------- time rules (subset of OSM opening_hours syntax) ---------- */
+const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+const DAYNAMES = {Mo:'Mon',Tu:'Tue',We:'Wed',Th:'Thu',Fr:'Fri',Sa:'Sat',Su:'Sun',PH:'bank holidays'};
+const humanCond = c => c.replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g, m => DAYNAMES[m]).replace(/-/g, '–');
+/** Returns fn(date, isBankHoliday) -> boolean, or null when the rule can't be understood. */
+function parseHours(str){
+  if (!str) return null;
+  str = str.trim().replace(/24 ?Hrs?/ig, '00:00-24:00');
+  const parsed = [];
+  for (const raw of str.split(';').map(s => s.trim()).filter(Boolean)){
+    if (raw === '24/7'){ parsed.push({any:true, spans:[[0,1440]], state:true}); continue; }
+    let rest = raw, days = null, ph = false;
+    const dm = rest.match(/^((?:(?:Mo|Tu|We|Th|Fr|Sa|Su|PH)(?:\s*-\s*(?:Mo|Tu|We|Th|Fr|Sa|Su))?\s*,?\s*)+)/);
+    if (dm){
+      days = new Set();
+      for (const part of dm[1].split(',').map(s => s.trim()).filter(Boolean)){
+        if (part === 'PH'){ ph = true; continue; }
+        const [a, b] = part.split('-').map(s => s.trim()), ia = DAYS.indexOf(a);
+        if (b){ const ib = DAYS.indexOf(b); for (let i = ia, n = 0; n < 7; i = (i+1)%7, n++){ days.add(i); if (i === ib) break; } }
+        else days.add(ia);
+      }
+      rest = rest.slice(dm[1].length).trim();
+    }
+    let spans = [], state = true;
+    if (rest === '' || /^open$/i.test(rest)) spans = [[0,1440]];
+    else if (/^(off|closed)$/i.test(rest)){ spans = [[0,1440]]; state = false; }
+    else for (const sp of rest.split(',')){
+      const t = sp.trim().match(/^(\d{1,2})[:.](\d{2})\s*-\s*(\d{1,2})[:.](\d{2})$/);
+      if (!t) return null;
+      spans.push([+t[1]*60 + +t[2], +t[3]*60 + +t[4]]);
+    }
+    parsed.push({any:!dm, days, ph, spans, state});
+  }
+  if (!parsed.length) return null;
+  return (d, isPH) => {
+    const dow = d.getDay(), t = d.getHours()*60 + d.getMinutes();
+    let res = false;
+    for (const r of parsed){
+      if (!(r.any || r.days.has(dow) || (r.ph && isPH))) continue;
+      if (r.spans.some(([s, e]) => s <= e ? (t >= s && t < e) : (t >= s || t < e))) res = r.state;
+    }
+    return res;
+  };
+}
+/** "no_parking @ (Mo-Fr 08:30-18:30); no_stopping @ (...)" -> [{value, cond, fn}] */
+function parseConditional(str){
+  const out = [], re = /([^@;]+?)\s*@\s*(?:\(([^)]*)\)|([^;]+))/g; let m;
+  while (str && (m = re.exec(str))){ const cond = (m[2] ?? m[3]).trim(); out.push({value:m[1].trim(), cond, fn:parseHours(cond)}); }
+  return out;
+}
+function parseDuration(s){ // -> minutes
+  if (!s) return null;
+  const m = String(s).match(/([\d.]+)\s*(h|hour|hours|hr|hrs|min|mins|minute|minutes|m|day|days)?/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]), u = (m[2] || 'min').toLowerCase();
+  return u.startsWith('h') ? n*60 : u.startsWith('d') ? n*1440 : n;
+}
+const durLabel = m => m >= 60 ? (m % 60 ? (m/60).toFixed(1) : m/60) + (m === 60 ? ' hour' : ' hours') : m + ' min';
+
+/* ---------- bank holidays ---------- */
+let bankHolidays = new Set(['2026-12-25','2026-12-28','2027-01-01','2027-03-26','2027-03-29','2027-05-03','2027-05-31','2027-08-30','2027-12-27','2027-12-28']);
+fetch('https://www.gov.uk/bank-holidays.json').then(r => r.json()).then(j => {
+  bankHolidays = new Set(j['england-and-wales'].events.map(e => e.date)); if (state.data) render();
+}).catch(() => {});
+const isPH = d => bankHolidays.has(ymd(d));
+
+/* ---------- Congestion Charge zone (approximate outline along the Inner Ring Road) ---------- */
+const CCZ = [[51.5203,-0.1700],[51.5226,-0.1571],[51.5238,-0.1439],[51.5270,-0.1325],[51.5303,-0.1239],[51.5322,-0.1060],[51.5256,-0.0876],[51.5237,-0.0773],[51.5152,-0.0722],[51.5100,-0.0745],[51.5075,-0.0745],[51.5035,-0.0762],[51.4950,-0.0835],[51.4946,-0.1003],[51.4885,-0.1110],[51.4861,-0.1240],[51.4893,-0.1297],[51.4955,-0.1420],[51.5027,-0.1510],[51.5131,-0.1589]];
+function inPoly(pt, poly){
+  let inside = false;
+  for (let i = 0, j = poly.length-1; i < poly.length; j = i++){
+    const [yi, xi] = poly[i], [yj, xj] = poly[j];
+    if ((yi > pt[0]) !== (yj > pt[0]) && pt[1] < (xj-xi)*(pt[0]-yi)/(yj-yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function distToPoly(pt, poly){
+  const kx = 111320*Math.cos(pt[0]*Math.PI/180), ky = 110540; let best = Infinity;
+  for (let i = 0; i < poly.length; i++){
+    const a = poly[i], b = poly[(i+1)%poly.length];
+    const ax = (a[1]-pt[1])*kx, ay = (a[0]-pt[0])*ky, bx = (b[1]-pt[1])*kx, by = (b[0]-pt[0])*ky;
+    const dx = bx-ax, dy = by-ay, t = Math.max(0, Math.min(1, -(ax*dx+ay*dy)/(dx*dx+dy*dy)));
+    best = Math.min(best, Math.hypot(ax+t*dx, ay+t*dy));
+  }
+  return best;
+}
+function cczCharging(d){ // is the Congestion Charge operating at time d?
+  const md = (d.getMonth()+1)*100 + d.getDate();
+  if (md >= 1225 || md === 101) return false;             // no charge 25 Dec – 1 Jan
+  const t = d.getHours()*60 + d.getMinutes(), we = d.getDay() === 0 || d.getDay() === 6 || isPH(d);
+  return we ? (t >= 720 && t < 1080) : (t >= 420 && t < 1080);
+}
+
+/* ---------- state ---------- */
+const state = {dest:null, data:null, tab:'cp', loading:false, error:null};
+const samples = () => { // times across the stay, every 15 min
+  const start = new Date($('#when').value || Date.now()), n = Math.ceil(+$('#stay').value/15), out = [];
+  for (let i = 0; i <= n; i++) out.push(new Date(start.getTime() + i*15*60000));
+  return out;
+};
+
+/* ---------- map ---------- */
+const map = L.map('map', {zoomControl:true}).setView([51.5074, -0.1278], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · TfL Open Data'}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const legend = L.control({position:'bottomright'});
+legend.onAdd = () => { const d = L.DomUtil.create('div', 'legend');
+  d.innerHTML = '<b>Kerbside at your time</b><br><i style="background:var(--ok)"></i>Parking allowed<br><i style="background:#e49a00"></i>Check signs<br><i style="background:var(--no)"></i>No parking / permit only'; return d; };
+legend.addTo(map);
+map.on('click', e => { if (!state.loading) setDest(e.latlng.lat, e.latlng.lng, null); });
+const COLORS = {ok:'#1b8a4b', warn:'#e49a00', no:'#c22f2f', unknown:'#6b7785'};
+
+/* ---------- geocoding ---------- */
+async function geocode(q){
+  const pc = q.trim().match(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i);
+  if (pc){
+    const r = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(q.replace(/\s+/g, '')));
+    if (r.ok){ const j = (await r.json()).result; return [{lat:j.latitude, lon:j.longitude, label:j.postcode, borough:j.admin_district}]; }
+  }
+  const u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&countrycodes=gb&bounded=1'
+    + `&viewbox=${LONDON.w},${LONDON.n},${LONDON.e},${LONDON.s}&q=` + encodeURIComponent(q);
+  const j = await (await fetch(u)).json();
+  return j.map(x => ({lat:+x.lat, lon:+x.lon, label:shortName(x), borough:boroughOf(x.address)}));
+}
+const boroughOf = a => a ? (a.city_district || a.borough || a.municipality || (a.city === 'City of London' ? a.city : null) || a.city || null) : null;
+function shortName(x){
+  const a = x.address || {}, first = x.name || [a.house_number, a.road].filter(Boolean).join(' ');
+  return [first, x.name ? a.road : null, a.suburb || a.quarter || a.neighbourhood, a.postcode].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(', ') || x.display_name;
+}
+async function reverse(lat, lon){
+  try {
+    const j = await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&addressdetails=1&lat=${lat}&lon=${lon}`)).json();
+    return {label:shortName(j), borough:boroughOf(j.address)};
+  } catch { return {label:`${lat.toFixed(5)}, ${lon.toFixed(5)}`, borough:null}; }
+}
+
+/* ---------- data: OpenStreetMap (Overpass) + TfL ---------- */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+const PARKING_KEY = /^parking:(left|right|both|lane|condition)/;
+async function osmApi(lat, lon, r, signal){
+  const dLat = r/110540, dLon = r/(111320*Math.cos(lat*Math.PI/180));
+  const box = async (w, s, e, n, depth) => {
+    const res = await fetch(`https://api.openstreetmap.org/api/0.6/map.json?bbox=${w.toFixed(6)},${s.toFixed(6)},${e.toFixed(6)},${n.toFixed(6)}`, {signal});
+    if (res.status === 400 && depth < 2){ // too much data for one request: split into quarters
+      const mx = (w+e)/2, my = (s+n)/2;
+      return (await Promise.all([box(w, s, mx, my, depth+1), box(mx, s, e, my, depth+1), box(w, my, mx, n, depth+1), box(mx, my, e, n, depth+1)])).flat();
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return (await res.json()).elements;
+  };
+  const raw = await box(lon-dLon, lat-dLat, lon+dLon, lat+dLat, 0);
+  const nodes = new Map(), ways = new Map(), out = [], seen = new Set(), near = pts => pts.some(p => dist([lat, lon], [p.lat, p.lon]) <= r*1.1);
+  for (const e of raw) if (e.type === 'node') nodes.set(e.id, e); else if (e.type === 'way') ways.set(e.id, e);
+  const geomOf = w => (w?.nodes || []).map(id => nodes.get(id)).filter(Boolean).map(n => ({lat:n.lat, lon:n.lon}));
+  const centre = g => ({lat:g.reduce((a, p) => a + p.lat, 0)/g.length, lon:g.reduce((a, p) => a + p.lon, 0)/g.length});
+  for (const e of raw){
+    const t = e.tags, k = e.type + e.id; if (!t || seen.has(k)) continue;
+    const parking = t.amenity === 'parking';
+    if (e.type === 'node' && parking && near([e])){ seen.add(k); out.push({type:'node', id:e.id, lat:e.lat, lon:e.lon, tags:t}); }
+    else if (e.type === 'way' && (parking || (t.highway && Object.keys(t).some(x => PARKING_KEY.test(x))))){
+      const g = geomOf(e); if (g.length > 1 && near(g)){ seen.add(k); out.push({type:'way', id:e.id, tags:t, geometry:g, center:centre(g)}); }
+    } else if (e.type === 'relation' && parking){
+      const g = geomOf(ways.get((e.members || []).find(m => m.type === 'way' && m.role !== 'inner')?.ref));
+      if (g.length > 1 && near(g)){ seen.add(k); out.push({type:'relation', id:e.id, tags:t, geometry:g, center:centre(g)}); }
+    }
+  }
+  return out;
+}
+async function overpass(lat, lon, r){
+  const q = `[out:json][timeout:25];(nwr["amenity"="parking"](around:${r},${lat},${lon});way["highway"][~"^parking:(left|right|both|lane|condition)"~"."](around:${r},${lat},${lon}););out geom;`;
+  const key = `op:${r}:${lat.toFixed(5)},${lon.toFixed(5)}`;
+  try { const c = sessionStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
+  // Public Overpass servers are often busy: ask two at once, add a third if they are slow, take the first good answer.
+  const ctl = new AbortController(), timers = [setTimeout(() => ctl.abort(), 50000)];
+  const ask = async url => {
+    const res = await fetch(url, {method:'POST', body:'data=' + encodeURIComponent(q), headers:{'Content-Type':'application/x-www-form-urlencoded'}, signal:ctl.signal});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json(); if (!Array.isArray(j.elements) || j.remark) throw new Error('incomplete answer');
+    return j.elements;
+  };
+  const late = (fn, ms) => new Promise((ok, fail) => timers.push(setTimeout(() => fn().then(ok, fail), ms)));
+  try {
+    // If Overpass hasn't answered within 3 s, also pull the raw map area from the main OpenStreetMap API and filter it here.
+    const els = await Promise.any([ask(OVERPASS[0]), ask(OVERPASS[1]), late(() => osmApi(lat, lon, r, ctl.signal), 3000)]);
+    try { sessionStorage.setItem(key, JSON.stringify(els)); } catch {}
+    return els;
+  } catch {
+    throw new Error('OpenStreetMap did not answer. Check your connection, then press Check again.');
+  } finally { timers.forEach(clearTimeout); ctl.abort(); }
+}
+async function tflCarParks(lat, lon, r){
+  try {
+    const j = await (await fetch(`https://api.tfl.gov.uk/Place?type=CarPark&lat=${lat}&lon=${lon}&radius=${r}`)).json();
+    return (j.places || []).map(p => {
+      const a = {}; for (const x of p.additionalProperties || []) a[x.key] = x.value;
+      const tags = {name:p.commonName.replace(/\s*\(LUL\)/, '').replace(/\bStn\b/, 'Station') + ' car park', operator:'Transport for London', access:'yes', fee:'yes'};
+      if (a.NumberOfSpaces) tags.capacity = a.NumberOfSpaces;
+      if (a.NumberOfDisabledBays > 0) tags['capacity:disabled'] = a.NumberOfDisabledBays;
+      if (a.OpeningHours) tags.opening_hours = a.OpeningHours.replace(/;\s*$/, '');
+      if (a.MaxHeightMetres > 0) tags.maxheight = a.MaxHeightMetres;
+      const d = a.StandardTariffsCashlessDaily || a.StandardTariffsCashDaily;
+      if (d) tags.charge = `£${(+d).toFixed(2)} weekday` + (a.SaturdayAndBankHolidays ? `, £${(+a.SaturdayAndBankHolidays).toFixed(2)} Sat` : '') + (a.StandardTariffsCashlessSunday ? `, £${(+a.StandardTariffsCashlessSunday).toFixed(2)} Sun` : '') + ' (all day)';
+      if (a.MethodsOfPayment) tags.payment = a.MethodsOfPayment;
+      return {src:'TfL', id:'tfl' + p.id, lat:p.lat, lon:p.lon, tags};
+    });
+  } catch { return []; }
+}
+
+/* ---------- interpretation: car parks ---------- */
+const STREET_KINDS = ['street_side','lane','on_kerb','half_on_kerb','shoulder','on_street'];
+const KIND = {surface:'Surface car park','multi-storey':'Multi-storey car park',underground:'Underground car park',rooftop:'Rooftop car park',street_side:'On-street bays',lane:'On-street parking',on_kerb:'On-kerb parking',half_on_kerb:'Half-on-kerb parking',carports:'Carports',garage_boxes:'Garages'};
+const ACCESS = {yes:'Public',public:'Public',permissive:'Public (by permission)',customers:'Customers only',permit:'Permit holders only',residents:'Residents only',private:'Private / permit holders only',no:'No public access',disabled:'Blue Badge holders only',delivery:'Loading / deliveries only',employees:'Staff only',unknown:'Access unknown'};
+function evalCarPark(el, dest, times){
+  const t = el.tags || {}, c = el.lat != null ? [el.lat, el.lon] : el.center ? [el.center.lat, el.center.lon] : el.bounds ? [(el.bounds.minlat+el.bounds.maxlat)/2, (el.bounds.minlon+el.bounds.maxlon)/2] : null;
+  if (!c) return null;
+  const street = STREET_KINDS.includes(t.parking), kindName = KIND[t.parking] || 'Car park';
+  const o = {id:el.id, src:el.src || 'OSM', street, pos:c, d:dist(dest, c), tags:t, geom:el.geometry, facts:[],
+    name: t.name || (t.operator && !street ? `${t.operator} ${kindName.toLowerCase()}` : kindName), kind:kindName};
+  const acc = t.access || (t.disabled === 'designated' ? 'disabled' : null), stay = +$('#stay').value;
+  let level = 'ok', head = street ? 'Bays available to the public' : 'Open to the public';
+  const worse = (l, h) => { const rank = {ok:0, unknown:1, warn:2, no:3}; if (rank[l] > rank[level]){ level = l; head = h; } };
+  if (street && !acc && !t.fee && !t.maxstay){ o.untagged = true; worse('warn', 'Marked bays — pay, permit or loading not recorded, check the sign'); }
+  else if (!acc){ if (!t.name && !t.fee && !t.operator && !t.opening_hours && !t.capacity) worse('unknown', 'Public access not confirmed — may be private'); }
+  else if (!['yes','public','permissive'].includes(acc)) worse(acc === 'customers' ? 'warn' : 'no', ACCESS[acc] || title(acc));
+  // opening hours across the stay
+  if (t.opening_hours){
+    const fn = parseHours(t.opening_hours);
+    if (!fn) o.facts.push(['Hours', t.opening_hours + ' (check before you go)']);
+    else {
+      const open = times.map(d => fn(d, isPH(d))), firstClosed = open.indexOf(false);
+      o.facts.push(['Hours', t.opening_hours === '24/7' || /00:00-24:00/.test(t.opening_hours.replace(/24 ?Hrs?/i, '00:00-24:00')) ? 'Open 24 hours' : humanCond(t.opening_hours)]);
+      if (!open[0]) worse('no', 'Closed when you arrive');
+      else if (firstClosed > 0) worse('warn', `Closes around ${hm(times[firstClosed])} — before you plan to leave`);
+    }
+  }
+  const ms = parseDuration(t.maxstay);
+  if (t.maxstay && t.maxstay !== 'no' && t.maxstay !== 'unlimited'){ o.facts.push(['Max stay', ms ? durLabel(ms) : t.maxstay]); if (ms && ms < stay) worse('warn', `Max stay ${durLabel(ms)} — shorter than your stay`); }
+  // fee
+  let fee = t.fee === 'yes' ? 'Paid' : t.fee === 'no' ? 'Free' : t.fee ? title(t.fee) : null;
+  const feeRules = parseConditional(t['fee:conditional']);
+  if (feeRules.length) fee = (fee || 'Fee') + ' — ' + feeRules.map(r => `${r.value === 'yes' ? 'paid' : r.value === 'no' ? 'free' : r.value} ${humanCond(r.cond)}`).join('; ');
+  if (t.charge) fee = (fee ? fee + ' · ' : '') + t.charge;
+  o.facts.unshift(['Cost', fee || 'Not recorded — assume paid']);
+  if (level === 'ok') head += t.fee === 'no' ? ' · free' : t.fee === 'yes' ? ' · paid' : '';
+  if (t.capacity) o.facts.push(['Spaces', t.capacity + (t['capacity:disabled'] && t['capacity:disabled'] !== 'no' ? ` (${t['capacity:disabled'] === 'yes' ? 'some' : t['capacity:disabled']} Blue Badge)` : '')]);
+  if (t.maxheight) o.facts.push(['Height limit', String(t.maxheight).replace(/^([\d.]+)$/, '$1 m')]);
+  if (t.payment) o.facts.push(['Pay by', t.payment]);
+  if (t.zone || t['parking:zone']) o.facts.push(['Zone', t.zone || t['parking:zone']]);
+  if (t.operator && !o.name.includes(t.operator)) o.facts.push(['Operator', t.operator]);
+  if (acc && ['yes','public','permissive'].includes(acc) === false && level !== 'no' && level !== 'warn') o.facts.push(['Access', ACCESS[acc] || title(acc)]);
+  o.website = t.website || t['contact:website'];
+  o.level = level; o.head = head;
+  return o;
+}
+
+/* ---------- interpretation: kerbside rules on streets ---------- */
+const RESTR = {no_parking:'No parking', no_stopping:'No stopping', no_standing:'No waiting', loading_only:'Loading only', charging_only:'EV charging only', none:'No restriction'};
+function buildSide(tags, side){
+  const g = k => tags[`parking:${side}${k}`] ?? tags[`parking:both${k}`];
+  const s = {pos:g(''), restr:g(':restriction'), restrC:g(':restriction:conditional'), reason:g(':restriction:reason'), fee:g(':fee'), feeC:g(':fee:conditional'),
+    maxstay:g(':maxstay'), access:g(':access'), accessC:g(':access:conditional'), zone:g(':zone'), orient:g(':orientation'), charge:g(':charge')};
+  if (s.pos === undefined && !s.restr && !s.restrC){ // older tagging scheme
+    const lane = tags[`parking:lane:${side}`] ?? tags['parking:lane:both'], cond = tags[`parking:condition:${side}`] ?? tags['parking:condition:both'];
+    const ti = tags[`parking:condition:${side}:time_interval`] ?? tags['parking:condition:both:time_interval'];
+    if (lane){ if (['no_parking','no_stopping','no'].includes(lane)){ s.pos = 'no'; if (lane !== 'no') s.restr = lane; } else { s.pos = 'lane'; s.orient = lane; } }
+    if (cond){
+      if (['no_parking','no_stopping'].includes(cond)){ if (ti) s.restrC = `${cond} @ (${ti})`; else s.restr = cond; }
+      else if (cond === 'free') s.fee = 'no';
+      else if (cond === 'ticket'){ if (ti) s.feeC = `yes @ (${ti})`; else s.fee = 'yes'; }
+      else if (cond === 'residents' || cond === 'private'){ if (ti) s.accessC = `permit @ (${ti})`; else s.access = 'permit'; }
+      s.maxstay = tags[`parking:condition:${side}:maxstay`] ?? tags['parking:condition:both:maxstay'];
+    }
+  }
+  if (s.pos === undefined && !s.restr && !s.restrC && !s.fee && !s.access) return null;
+  if (s.pos === 'separate') return null; // bays are mapped separately and show up as their own entries
+  s.restrRules = parseConditional(s.restrC); s.accessRules = parseConditional(s.accessC); s.feeRules = parseConditional(s.feeC);
+  return s;
+}
+function codeAt(s, t, ph){
+  let unknown = false;
+  const eff = (base, rules) => { let v = base; for (const r of rules){ if (!r.fn){ unknown = true; continue; } if (r.fn(t, ph)) v = r.value; } return v; };
+  const restr = eff(s.restr, s.restrRules), access = eff(s.access, s.accessRules), fee = eff(s.fee, s.feeRules);
+  if (restr && restr !== 'none' && RESTR[restr]) return 'blocked:' + restr;
+  if (s.pos === 'no'){
+    if (unknown) return 'unknown';
+    if (s.restrRules.length && (!s.restr || s.restr === 'none')) return 'maybe';
+    return 'blocked:no';
+  }
+  if (unknown) return 'unknown';
+  if (access && !['yes','public','permissive'].includes(access)) return 'permit:' + access;
+  return fee === 'yes' ? 'pay' : fee === 'no' ? 'free' : 'allowed';
+}
+const CODE = c => {
+  const [k, v] = c.split(':');
+  if (k === 'blocked') return {level:'no', label:v === 'no' ? 'No parking' : RESTR[v]};
+  if (k === 'permit') return {level:v === 'customers' ? 'warn' : 'no', label:ACCESS[v] || title(v)};
+  return {maybe:{level:'warn', label:'Restriction not in force — parking likely allowed, check the sign'}, unknown:{level:'warn', label:'Timed restriction — check the sign'},
+    pay:{level:'ok', label:'Paid parking'}, free:{level:'ok', label:'Free parking'}, allowed:{level:'ok', label:'Parking allowed — check sign for payment or permit'}}[k];
+};
+const RANK = {ok:0, unknown:1, warn:2, no:3};
+function evalSide(s, times){
+  const codes = times.map(d => codeAt(s, d, isPH(d))), first = CODE(codes[0]);
+  let level = first.level, head = first.label;
+  const changeAt = codes.findIndex(c => c !== codes[0]);
+  if (changeAt > 0){
+    const next = CODE(codes[changeAt]);
+    if (RANK[next.level] > RANK[level]){ level = next.level === 'no' ? 'warn' : next.level; head = `${first.label.split(' — ')[0]} on arrival, but “${next.label.split(' — ')[0].toLowerCase()}” starts ${hm(times[changeAt])}`; if (next.level === 'no') level = 'no'; }
+    else if (first.level === 'no') head = `${first.label} until ${hm(times[changeAt])}, then ${next.label.split(' — ')[0].toLowerCase()}`;
+  }
+  const facts = [], stay = +$('#stay').value;
+  if (s.restr && s.restr !== 'none' && RESTR[s.restr]) facts.push(RESTR[s.restr] + ' at any time' + (s.reason ? ` (${s.reason.replace(/_/g, ' ')})` : ''));
+  for (const r of s.restrRules) facts.push(`${RESTR[r.value] || title(r.value)} ${humanCond(r.cond)}`);
+  if (s.access && !['yes','public'].includes(s.access)) facts.push(ACCESS[s.access] || title(s.access));
+  for (const r of s.accessRules) facts.push(`${ACCESS[r.value] || title(r.value)} ${humanCond(r.cond)}`);
+  if (s.fee === 'yes') facts.push('Payment required' + (s.charge ? ` (${s.charge})` : '')); else if (s.fee === 'no' && s.pos !== 'no') facts.push('No charge');
+  for (const r of s.feeRules) facts.push(`${r.value === 'yes' ? 'Payment required' : r.value === 'no' ? 'Free' : title(r.value)} ${humanCond(r.cond)}`);
+  const ms = parseDuration(s.maxstay);
+  if (s.maxstay && ms){ facts.push('Max stay ' + durLabel(ms)); if (ms < stay && level === 'ok'){ level = 'warn'; head = `Max stay ${durLabel(ms)} — shorter than your stay`; } }
+  if (s.zone) facts.push('Parking zone ' + s.zone);
+  if (s.pos && s.pos !== 'no' && s.pos !== 'yes') facts.push(({lane:'On the carriageway',street_side:'Marked bays beside the road',on_kerb:'On the pavement (signed)',half_on_kerb:'Half on the pavement (signed)',shoulder:'On the verge'}[s.pos] || title(s.pos)) + (s.orient && ['parallel','diagonal','perpendicular'].includes(s.orient) ? `, ${s.orient}` : ''));
+  return {level, head, facts};
+}
+const compass = b => ['north','north-east','east','south-east','south','south-west','west','north-west'][Math.round(((b % 360) + 360) % 360 / 45) % 8];
+function offsetLine(pts, metres){ // shift a line sideways: positive = left of travel direction
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i-1)], b = pts[Math.min(pts.length-1, i+1)], kx = 111320*Math.cos(p[0]*Math.PI/180), ky = 110540;
+    const dx = (b[1]-a[1])*kx, dy = (b[0]-a[0])*ky, len = Math.hypot(dx, dy) || 1;
+    return [p[0] + (dx/len*metres)/ky, p[1] + (-dy/len*metres)/kx];
+  });
+}
+function evalStreet(el, dest, times){
+  const pts = (el.geometry || []).map(g => [g.lat, g.lon]); if (pts.length < 2) return null;
+  const a = pts[0], b = pts[pts.length-1];
+  const bearing = Math.atan2((b[1]-a[1])*Math.cos(a[0]*Math.PI/180), b[0]-a[0])*180/Math.PI;
+  const sides = [];
+  for (const [side, off] of [['left', -90], ['right', 90]]){
+    const s = buildSide(el.tags, side); if (!s) continue;
+    sides.push({side, where:compass(bearing + off) + ' side', ...evalSide(s, times)});
+  }
+  if (!sides.length) return null;
+  if (sides.length === 2 && sides[0].head === sides[1].head && sides[0].facts.join('|') === sides[1].facts.join('|')){ sides.pop(); sides[0].side = 'both'; sides[0].where = 'both sides'; }
+  return {id:el.id, name:el.tags.name || 'Unnamed road', pts, sides, d:Math.min(...pts.map(p => dist(dest, p)))};
+}
+
+/* ---------- search flow ---------- */
+async function setDest(lat, lon, info){
+  $('#sugg').hidden = true;
+  if (!inLondon(lat, lon)){ state.error = 'That spot is outside Greater London — this app only covers London.'; state.data = null; return render(); }
+  state.loading = true; state.error = null; render();
+  try {
+    const r = +$('#rad').value;
+    const [inf, els, tfl] = await Promise.all([info || reverse(lat, lon), overpass(lat, lon, r), tflCarParks(lat, lon, r)]);
+    state.dest = {lat, lon, ...inf}; state.data = {els, tfl, r};
+    if (!info) $('#q').value = inf.label;
+  } catch (e){ state.error = e.message; state.data = null; }
+  state.loading = false; render(true);
+}
+$('#form').addEventListener('submit', async e => {
+  e.preventDefault(); const q = $('#q').value.trim(); if (!q) return;
+  state.loading = true; state.error = null; render();
+  try {
+    const hits = (await geocode(q)).filter(h => inLondon(h.lat, h.lon));
+    state.loading = false;
+    if (!hits.length){ state.error = `Couldn't find “${q}” in London. Try a postcode or a fuller address.`; state.data = null; return render(); }
+    if (hits.length === 1) return setDest(hits[0].lat, hits[0].lon, hits[0]);
+    render();
+    const box = $('#sugg'); box.innerHTML = ''; box.hidden = false;
+    hits.forEach(h => { const b = document.createElement('button'); b.type = 'button'; b.textContent = h.label; b.onclick = () => { $('#q').value = h.label; setDest(h.lat, h.lon, h); }; box.appendChild(b); });
+  } catch { state.loading = false; state.error = 'Address lookup failed — check your connection and try again.'; render(); }
+});
+document.addEventListener('click', e => { if (!e.target.closest('.search')) $('#sugg').hidden = true; });
+$('#geo').onclick = () => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => setDest(p.coords.latitude, p.coords.longitude, null), () => { state.error = 'Could not get your location.'; render(); }) : null;
+$('#when').onchange = $('#stay').onchange = () => state.data && render();
+$('#rad').onchange = () => state.dest && setDest(state.dest.lat, state.dest.lon, {label:state.dest.label, borough:state.dest.borough});
+
+/* ---------- render ---------- */
+const gmNav = p => `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${p[0]},${p[1]}`;
+const gmSV = p => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p[0]},${p[1]}`;
+const features = {}; // id -> {layer, pos}
+function focusFeature(id){ const f = features[id]; if (!f) return; map.flyTo(f.pos, Math.max(map.getZoom(), 17), {duration:.5}); f.layer.openPopup(f.pos); }
+function highlightCard(id, tab){
+  if (state.tab !== tab){ state.tab = tab; render(); }
+  const c = document.getElementById('c' + id); if (!c) return;
+  document.querySelectorAll('.card.hl').forEach(x => x.classList.remove('hl')); c.classList.add('hl'); c.scrollIntoView({behavior:'smooth', block:'center'});
+}
+function render(fit){
+  const body = $('#body');
+  if (state.loading){ body.innerHTML = '<div class="loading"><div class="spin"></div>Looking up car parks and kerbside rules…<br><small>Usually 3–10 seconds.</small></div>'; return; }
+  if (!state.data){
+    body.innerHTML = (state.error ? `<div class="err">${esc(state.error)}</div>` : '') + `<div class="empty"><h2>Where are you driving to?</h2>
+      Enter a London destination and when you'll arrive. You'll see nearby car parks, which streets allow parking at that time, and the charges and rules that apply.
+      <div class="ex">${['Royal Albert Hall','Borough Market','Greenwich Park','E8 1EA','Wembley Stadium'].map(x => `<button class="chip" data-ex="${x}">${x}</button>`).join('')}</div>
+      <p style="font-size:13px">Tip: you can also click anywhere on the map.</p></div>`;
+    body.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => { $('#q').value = b.dataset.ex; $('#form').requestSubmit(); });
+    return;
+  }
+  const {dest} = state, dp = [dest.lat, dest.lon], times = samples(), arrive = times[0], r = state.data.r;
+  // --- car parks & bays
+  const osmParks = state.data.els.filter(e => e.tags?.amenity === 'parking').map(e => evalCarPark(e, dp, times)).filter(Boolean);
+  for (const t of state.data.tfl){ // merge TfL station car parks with the matching OSM one where present
+    const m = osmParks.find(o => !o.street && dist(o.pos, [t.lat, t.lon]) < 120);
+    if (m){ const idx = osmParks.indexOf(m); osmParks[idx] = evalCarPark({...t, id:m.id, geometry:m.geom, tags:{...t.tags, ...m.tags, name:m.tags.name || t.tags.name, charge:t.tags.charge, opening_hours:m.tags.opening_hours || t.tags.opening_hours}}, dp, times); }
+    else { const o = evalCarPark(t, dp, times); if (o) osmParks.push(o); }
+  }
+  const hidden = osmParks.filter(o => ['private','no','employees','residents'].includes(o.tags.access)).length;
+  const visible = osmParks.filter(o => !['private','no','employees','residents'].includes(o.tags.access));
+  const sortFn = (a, b) => (RANK[a.level] - RANK[b.level]) || (a.d - b.d);
+  const parks = visible.filter(o => !o.street).sort(sortFn), bays = visible.filter(o => o.street).sort(sortFn);
+  // --- streets, grouped by name + identical rules
+  const segs = state.data.els.filter(e => e.type === 'way' && e.tags?.highway).map(e => evalStreet(e, dp, times)).filter(Boolean);
+  const groups = new Map();
+  for (const s of segs){
+    const key = s.name + '§' + s.sides.map(x => x.where + x.head + x.facts.join('|')).join('§');
+    const g = groups.get(key); if (g){ g.segs.push(s); if (s.d < g.d){ g.d = s.d; g.near = s; } } else groups.set(key, {id:s.id, name:s.name, sides:s.sides, d:s.d, near:s, segs:[s]});
+  }
+  const streets = [...groups.values()].map(g => ({...g, level:g.sides.map(s => s.level).sort((a, b) => RANK[a] - RANK[b])[0]})).sort(sortFn);
+
+  // --- zones
+  const inCCZ = inPoly(dp, CCZ), edge = distToPoly(dp, CCZ), nearEdge = edge < 250, charging = times.some(cczCharging), ph = isPH(arrive);
+
+  // --- verdict
+  const v = [], goodParks = parks.filter(p => p.level === 'ok'), okStreets = streets.filter(s => s.level === 'ok'), okBays = bays.filter(b => b.level === 'ok');
+  if (goodParks.length) v.push(['ok', `<b>${goodParks.length} public car park${goodParks.length > 1 ? 's' : ''}</b> within ${walk(r)} min walk — nearest is ${esc(goodParks.sort((a, b) => a.d - b.d)[0].name)} (${walk(goodParks[0].d)} min).`]);
+  else if (parks.length) v.push(['warn', `${parks.length} car park${parks.length > 1 ? 's' : ''} nearby, but none confirmed open to the public for your whole stay.`]);
+  else v.push(['no', `No public car parks mapped within ${walk(r)} min walk — try a longer walk.`]);
+  const onStreetOk = okStreets.length + okBays.length;
+  const names = [...new Set(okStreets.map(s => s.name).filter(n => n !== 'Unnamed road'))];
+  const confirmed = okStreets.some(s => s.sides.some(x => /^(Free|Paid) parking/.test(x.head))) || okBays.length;
+  if (onStreetOk) v.push(['ok', `<b>${confirmed ? 'On-street parking looks possible' : 'Kerbside parking exists'}</b> on ${names.length ? names.slice(0, 3).map(esc).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more streets` : '') : `${okBays.length} set${okBays.length > 1 ? 's' : ''} of bays`}${confirmed ? ' at your time.' : ' — pay or permit rules aren\'t recorded, so check the borough\'s zone hours (Charges & rules tab).'}`]);
+  else if (bays.some(b => b.untagged)) v.push(['warn', `<b>Marked on-street bays in ${bays.filter(b => b.untagged).length} nearby spots</b> (nearest ${walk(Math.min(...bays.filter(b => b.untagged).map(b => b.d)))} min), but whether they are pay or permit bays isn't recorded — check the signs.`]);
+  else if (streets.length || bays.length) v.push(['no', 'Mapped streets nearby are restricted or permit-only during your stay.']);
+  else v.push(['', 'No kerbside rules are mapped here yet — use Street View to read the signs.']);
+  if (inCCZ && !nearEdge) v.push([charging ? 'warn' : 'ok', charging ? '<b>Congestion Charge applies</b> — inside the zone during charging hours.' : 'Inside the Congestion Charge zone, but outside charging hours for your stay.']);
+  else if (nearEdge) v.push(['warn', 'Right by the Congestion Charge boundary — check the exact address with TfL.']);
+  if (ph) v.push(['warn', 'You arrive on a bank holiday — some boroughs relax restrictions, many do not.']);
+
+  const tabs = [['cp', `Car parks (${parks.length})`], ['st', `Streets (${streets.length + bays.length})`], ['ru', 'Charges & rules']];
+  let html = (state.error ? `<div class="err">${esc(state.error)}</div>` : '') + `<div class="verdict"><h2>Parking near ${esc(dest.label.split(',')[0])}</h2>
+    <div class="where">${arrive.toLocaleString('en-GB', {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})} for ${durLabel(+$('#stay').value)}${dest.borough ? ' · ' + esc(dest.borough) : ''}</div>
+    <ul>${v.map(([c, t]) => `<li class="${c}">${t}</li>`).join('')}</ul></div>
+    <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${state.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+
+  const parkCard = o => `<div class="card" id="c${esc(o.id)}" data-id="${esc(o.id)}"><div class="top"><h3>${esc(o.name)}</h3><span class="dist">${distLabel(o.d)}</span></div>
+    <span class="badge ${o.level}">${esc(o.head)}</span>
+    <ul class="facts">${o.facts.map(([k, val]) => `<li><b>${k}:</b> ${esc(val)}</li>`).join('')}${o.name !== o.kind ? `<li><b>Type:</b> ${o.kind}${o.src === 'TfL' ? ' · TfL data' : ''}</li>` : ''}</ul>
+    <div class="links"><a href="${gmNav(o.pos)}" target="_blank" rel="noopener">Navigate here</a><a href="${gmSV(o.pos)}" target="_blank" rel="noopener">Street View</a>${o.website && /^https?:/.test(o.website) ? `<a href="${esc(o.website)}" target="_blank" rel="noopener">Website</a>` : ''}</div></div>`;
+
+  if (state.tab === 'cp'){
+    html += parks.length ? parks.map(parkCard).join('') : '<div class="note">No car parks found in range. Increase “Walk up to” or check the Streets tab.</div>';
+    if (hidden) html += `<div class="note">${hidden} private or residents-only car park${hidden > 1 ? 's' : ''} hidden.</div>`;
+    html += '<div class="note">Prices are rarely in open data. “Paid” car parks in central London typically cost several pounds an hour — check the operator before you travel.</div>';
+  } else if (state.tab === 'st'){
+    const plain = bays.filter(b => b.untagged).sort((a, b) => a.d - b.d);
+    if (streets.length > 40) html += `<div class="note">Showing the 40 best nearby options of ${streets.length} mapped street sections — the rest are drawn on the map (click any line).</div>`;
+    html += streets.slice(0, 40).map(g => `<div class="card" id="c${g.id}" data-id="${g.id}"><div class="top"><h3>${esc(g.name)}</h3><span class="dist">${distLabel(g.d)}</span></div>
+      ${g.sides.map(s => `<div class="side"><div class="lbl">${s.where}</div><span class="badge ${s.level}">${esc(s.head)}</span>${s.facts.length ? `<ul class="facts">${s.facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</div>`).join('')}
+      <div class="links"><a href="${gmSV(g.near.pts[Math.floor(g.near.pts.length/2)])}" target="_blank" rel="noopener">See the signs in Street View</a><a href="${gmNav(g.near.pts[Math.floor(g.near.pts.length/2)])}" target="_blank" rel="noopener">Navigate here</a></div></div>`).join('');
+    if (bays.length) html += `<h3 style="font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 2px 6px">Marked bays</h3>` + bays.filter(b => !b.untagged).map(parkCard).join('')
+      + (plain.length ? `<div class="card" data-id="${esc(plain[0].id)}"><div class="top"><h3>${plain.length} group${plain.length > 1 ? 's' : ''} of marked bays</h3><span class="dist">nearest ${distLabel(plain[0].d)}</span></div>
+        <span class="badge warn">Type not recorded — could be pay, permit or loading bays</span>
+        <ul class="facts"><li>Shown as amber dots on the map. In central London most are pay-by-phone or residents' bays during zone hours.</li></ul>
+        <div class="links">${plain.slice(0, 4).map((b, i) => `<a href="${gmSV(b.pos)}" target="_blank" rel="noopener">Signs at bay ${i + 1} (${walk(b.d)} min)</a>`).join('')}</div></div>` : '');
+    if (!streets.length && !bays.length) html += '<div class="note">Nobody has mapped kerbside rules for streets in this area yet.</div>';
+    html += '<div class="note"><b>Streets not listed are unmapped, not unrestricted.</b> Kerbside rules come from OpenStreetMap volunteers and can be incomplete or out of date. The sign on the street always wins — use the Street View link to read it before you go.</div>';
+  } else {
+    const bq = dest.borough ? `https://www.google.com/search?q=${encodeURIComponent(dest.borough + ' council controlled parking zone hours map')}` : null;
+    html += `<div class="rule"><h3>Congestion Charge</h3><p>${nearEdge ? '<b>On or near the boundary</b> — the outline used here is approximate.' : inCCZ ? '<b>Your destination is inside the zone.</b>' : 'Your destination is outside the zone' + (edge < 1500 ? ', but your route may cross it.' : '.')}
+        ${inCCZ || nearEdge ? (charging ? ' Charging hours overlap your visit.' : ' Your visit is outside charging hours.') : ''}</p>
+        <p>Operates Mon–Fri 07:00–18:00 and Sat, Sun and bank holidays 12:00–18:00 (not 25 Dec–1 Jan). It is a daily charge (£18 from January 2026), payable by midnight on the third day after travel.</p>
+        <p><a href="https://tfl.gov.uk/modes/driving/congestion-charge" target="_blank" rel="noopener">Check an address and pay on tfl.gov.uk</a></p></div>
+      <div class="rule"><h3>ULEZ</h3><p><b>Applies here</b> — the Ultra Low Emission Zone covers every London borough, 24 hours a day (except Christmas Day). Vehicles that don't meet the emissions standard pay £12.50 a day.</p>
+        <p><a href="https://tfl.gov.uk/modes/driving/check-your-vehicle/" target="_blank" rel="noopener">Check your vehicle on tfl.gov.uk</a></p></div>
+      ${dest.borough ? `<div class="rule"><h3>${esc(dest.borough)}</h3><p>Each borough sets its own controlled parking zone (CPZ) hours, permit rules, visitor payment app and bank-holiday policy. Zone hours are shown on signs as you enter the zone.</p><p><a href="${bq}" target="_blank" rel="noopener">Find this borough's CPZ hours and map</a></p></div>` : ''}
+      <div class="rule"><h3><span class="sw dy"></span>Double yellow lines</h3><p>No waiting at any time. You may stop briefly to set down or pick up passengers.</p></div>
+      <div class="rule"><h3><span class="sw sy"></span>Single yellow line</h3><p>No waiting during the hours on the nearby plate — or, if there is no plate, the hours on the CPZ entry sign. Outside those hours you can park.</p></div>
+      <div class="rule"><h3><span class="sw dr"></span>Red routes</h3><p>Double red: no stopping at any time. Single red: no stopping during signed hours. Marked red-route bays allow short stays as signed. Enforced by camera.</p></div>
+      <div class="rule"><h3><span class="sw bay"></span>Marked bays</h3><p><b>Pay bays:</b> usually phone or app payment only; note the location code and max stay on the sign. <b>Resident / permit bays:</b> permit holders only during the signed hours — often open to anyone outside them. <b>Shared use:</b> permit holders or paying visitors.</p></div>
+      <div class="rule"><h3>Easy-to-miss London rules</h3><p>• Parking on the pavement is banned across London unless signs specifically allow it.<br>• Never park across a dropped kerb, even partly.<br>• Yellow marks on the kerb mean loading restrictions.<br>• Near stadiums and venues, event-day restrictions can extend zone hours.<br>• Blue Badge concessions are reduced in parts of central London (City, Westminster, Kensington &amp; Chelsea, part of Camden).<br>• Bank holidays are not automatically free — it varies by borough.</p></div>`;
+  }
+  body.innerHTML = html;
+  body.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; render(); });
+  body.querySelectorAll('.card[data-id]').forEach(c => c.onclick = e => { if (!e.target.closest('a')) focusFeature(c.dataset.id); });
+
+  // --- map
+  layer.clearLayers(); for (const k in features) delete features[k];
+  L.circle(dp, {radius:r, color:'#0a56a8', weight:1, dashArray:'5 5', fillOpacity:.03, interactive:false}).addTo(layer);
+  if (inCCZ || edge < 1500) L.polygon(CCZ, {color:'#c22f2f', weight:1.5, dashArray:'2 6', fill:false, interactive:false}).addTo(layer);
+  for (const g of streets) for (const seg of g.segs) for (const s of seg.sides){
+    const pts = s.side === 'both' ? seg.pts : offsetLine(seg.pts, s.side === 'left' ? 4 : -4);
+    const line = L.polyline(pts, {color:COLORS[s.level], weight:s.side === 'both' ? 6 : 4, opacity:.85}).addTo(layer)
+      .bindPopup(`<b>${esc(g.name)}</b> · ${s.where}<br>${esc(s.head)}${s.facts.length ? '<br><span style="color:#5b6876">' + s.facts.map(esc).join('<br>') + '</span>' : ''}`);
+    line.on('click', () => highlightCard(g.id, 'st'));
+    if (!features[g.id] || seg === g.near) features[g.id] = {layer:line, pos:seg.pts[Math.floor(seg.pts.length/2)]};
+  }
+  for (const o of [...parks, ...bays]){
+    if (o.geom && o.geom.length > 2) L.polygon(o.geom.map(g => [g.lat, g.lon]), {color:COLORS[o.level] === COLORS.ok ? '#0a56a8' : COLORS[o.level], weight:1.5, fillOpacity:.18, interactive:false}).addTo(layer);
+    const popup = `<b>${esc(o.name)}</b><br>${esc(o.head)}<br><span style="color:#5b6876">${distLabel(o.d)}</span>`;
+    const m = o.street
+      ? L.circleMarker(o.pos, {radius:6, color:'#fff', weight:2, fillColor:COLORS[o.level], fillOpacity:1}).addTo(layer)
+      : L.marker(o.pos, {icon:L.divIcon({className:'', html:`<div class="pm ${o.level}">P</div>`, iconSize:[26,26], iconAnchor:[13,13]})}).addTo(layer);
+    m.bindPopup(popup).on('click', () => highlightCard(o.id, o.street ? 'st' : 'cp'));
+    features[o.id] = {layer:m, pos:o.pos};
+  }
+  L.marker(dp, {icon:L.divIcon({className:'', html:'<div class="dest"></div>', iconSize:[18,18], iconAnchor:[9,9]}), zIndexOffset:1000}).addTo(layer).bindPopup(`<b>${esc(dest.label)}</b><br>Your destination`);
+  if (fit) map.fitBounds(L.latLng(dp).toBounds(r*2.3), {animate:true});
+}
+
+/* ---------- init ---------- */
+(() => { const d = new Date(Date.now() + 30*60000); d.setMinutes(Math.ceil(d.getMinutes()/15)*15, 0, 0);
+  $('#when').value = `${ymd(d)}T${hm(d)}`; })();
+render();
+setTimeout(() => map.invalidateSize(), 100);
+</script>
+</body>
+</html>
