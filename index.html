@@ -246,7 +246,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attri
 const layer = L.layerGroup().addTo(map);
 const legend = L.control({position:'bottomright'});
 legend.onAdd = () => { const d = L.DomUtil.create('div', 'legend');
-  d.innerHTML = '<b>Kerbside at your time</b><br><i style="background:var(--ok)"></i>Parking allowed<br><i style="background:#e49a00"></i>Check signs<br><i style="background:var(--no)"></i>No parking / permit only'; return d; };
+  d.innerHTML = '<b>Kerbside at your time</b><br><i style="background:var(--ok)"></i>Parking allowed<br><i style="background:#e49a00"></i>Check signs<br><i style="background:repeating-linear-gradient(90deg,var(--unk) 0 5px,transparent 5px 9px)"></i>Rules not mapped<br><i style="background:var(--no)"></i>No parking / permit only'; return d; };
 legend.addTo(map);
 map.on('click', e => { if (!state.loading) setDest(e.latlng.lat, e.latlng.lng, null); });
 const COLORS = {ok:'#1b8a4b', warn:'#e49a00', no:'#c22f2f', unknown:'#6b7785'};
@@ -277,6 +277,7 @@ async function reverse(lat, lon){
 
 /* ---------- data: OpenStreetMap (Overpass) + TfL ---------- */
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+const ROADS = ['residential','unclassified','living_street','tertiary','secondary','primary','trunk'];
 const PARKING_KEY = /^parking:(left|right|both|lane|condition)/;
 async function osmApi(lat, lon, r, signal){
   const dLat = r/110540, dLon = r/(111320*Math.cos(lat*Math.PI/180));
@@ -298,7 +299,7 @@ async function osmApi(lat, lon, r, signal){
     const t = e.tags, k = e.type + e.id; if (!t || seen.has(k)) continue;
     const parking = t.amenity === 'parking';
     if (e.type === 'node' && parking && near([e])){ seen.add(k); out.push({type:'node', id:e.id, lat:e.lat, lon:e.lon, tags:t}); }
-    else if (e.type === 'way' && (parking || (t.highway && Object.keys(t).some(x => PARKING_KEY.test(x))))){
+    else if (e.type === 'way' && (parking || (t.highway && (Object.keys(t).some(x => PARKING_KEY.test(x)) || (t.name && ROADS.includes(t.highway)))))){
       const g = geomOf(e); if (g.length > 1 && near(g)){ seen.add(k); out.push({type:'way', id:e.id, tags:t, geometry:g, center:centre(g)}); }
     } else if (e.type === 'relation' && parking){
       const g = geomOf(ways.get((e.members || []).find(m => m.type === 'way' && m.role !== 'inner')?.ref));
@@ -308,8 +309,8 @@ async function osmApi(lat, lon, r, signal){
   return out;
 }
 async function overpass(lat, lon, r){
-  const q = `[out:json][timeout:25];(nwr["amenity"="parking"](around:${r},${lat},${lon});way["highway"][~"^parking:(left|right|both|lane|condition)"~"."](around:${r},${lat},${lon}););out geom;`;
-  const key = `op:${r}:${lat.toFixed(5)},${lon.toFixed(5)}`;
+  const q = `[out:json][timeout:25];(nwr["amenity"="parking"](around:${r},${lat},${lon});way["highway"][~"^parking:(left|right|both|lane|condition)"~"."](around:${r},${lat},${lon});way["highway"~"^(${ROADS.join('|')})$"]["name"](around:${r},${lat},${lon}););out geom;`;
+  const key = `op2:${r}:${lat.toFixed(5)},${lon.toFixed(5)}`;
   try { const c = sessionStorage.getItem(key); if (c) return JSON.parse(c); } catch {}
   // Public Overpass servers are often busy: ask two at once, add a third if they are slow, take the first good answer.
   const ctl = new AbortController(), timers = [setTimeout(() => ctl.abort(), 50000)];
@@ -556,6 +557,21 @@ function render(fit){
   }
   const streets = [...groups.values()].map(g => ({...g, level:g.sides.map(s => s.level).sort((a, b) => RANK[a] - RANK[b])[0]})).sort(sortFn);
 
+  // --- streets with no kerbside rules mapped: still list them, with what is typical for that kind of road
+  const mappedIds = new Set(segs.map(s => s.id)), un = new Map();
+  for (const e of state.data.els){
+    const t = e.tags || {};
+    if (e.type !== 'way' || !ROADS.includes(t.highway) || !t.name || mappedIds.has(e.id) || ['private','no'].includes(t.access)) continue;
+    const pts = (e.geometry || []).map(g => [g.lat, g.lon]); if (pts.length < 2) continue;
+    const near = pts.reduce((a, p) => dist(dp, p) < dist(dp, a) ? p : a), d = dist(dp, near); if (d > r) continue;
+    const kind = ['trunk','primary'].includes(t.highway) ? 'main' : ['secondary','tertiary'].includes(t.highway) ? 'busy' : 'res';
+    const g = un.get(t.name); if (g){ g.lines.push(pts); if (d < g.d){ g.d = d; g.near = near; } if (kind === 'main' || (kind === 'busy' && g.kind === 'res')) g.kind = kind; }
+    else un.set(t.name, {id:'u' + e.id, name:t.name, d, near, kind, lines:[pts]});
+  }
+  const UN = {res:'Residential street — rules not mapped. Often parkable; may be permit-only during zone hours', busy:'Busier road — rules not mapped. Expect yellow lines or timed bays', main:'Main road — rules not mapped. Usually a red route or yellow lines; unlikely to park here'};
+  const unmapped = [...un.values()].filter(g => !streets.some(s => s.name === g.name)).sort((a, b) => ({res:0, busy:1, main:2}[a.kind] - {res:0, busy:1, main:2}[b.kind]) || (a.d - b.d));
+  const unRes = unmapped.filter(g => g.kind === 'res');
+
   // --- zones
   const inCCZ = inPoly(dp, CCZ), edge = distToPoly(dp, CCZ), nearEdge = edge < 250, charging = times.some(cczCharging), ph = isPH(arrive);
 
@@ -570,12 +586,13 @@ function render(fit){
   if (onStreetOk) v.push(['ok', `<b>${confirmed ? 'On-street parking looks possible' : 'Kerbside parking exists'}</b> on ${names.length ? names.slice(0, 3).map(esc).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more streets` : '') : `${okBays.length} set${okBays.length > 1 ? 's' : ''} of bays`}${confirmed ? ' at your time.' : ' — pay or permit rules aren\'t recorded, so check the borough\'s zone hours (Charges & rules tab).'}`]);
   else if (bays.some(b => b.untagged)) v.push(['warn', `<b>Marked on-street bays in ${bays.filter(b => b.untagged).length} nearby spots</b> (nearest ${walk(Math.min(...bays.filter(b => b.untagged).map(b => b.d)))} min), but whether they are pay or permit bays isn't recorded — check the signs.`]);
   else if (streets.length || bays.length) v.push(['no', 'Mapped streets nearby are restricted or permit-only during your stay.']);
-  else v.push(['', 'No kerbside rules are mapped here yet — use Street View to read the signs.']);
+  else if (unRes.length) v.push(['', `<b>Kerbside rules aren't mapped here.</b> ${unRes.length} residential street${unRes.length > 1 ? 's' : ''} nearby (${unRes.slice(0, 3).map(g => esc(g.name)).join(', ')}${unRes.length > 3 ? '…' : ''}) — often parkable, but check for a permit zone: see the Streets tab for Street View links.`]);
+  else v.push(['', 'No kerbside rules are mapped here and there are no residential streets in range — rely on car parks.']);
   if (inCCZ && !nearEdge) v.push([charging ? 'warn' : 'ok', charging ? '<b>Congestion Charge applies</b> — inside the zone during charging hours.' : 'Inside the Congestion Charge zone, but outside charging hours for your stay.']);
   else if (nearEdge) v.push(['warn', 'Right by the Congestion Charge boundary — check the exact address with TfL.']);
   if (ph) v.push(['warn', 'You arrive on a bank holiday — some boroughs relax restrictions, many do not.']);
 
-  const tabs = [['cp', `Car parks (${parks.length})`], ['st', `Streets (${streets.length + bays.length})`], ['ru', 'Charges & rules']];
+  const tabs = [['cp', `Car parks (${parks.length})`], ['st', `Streets (${streets.length + bays.length + unmapped.length})`], ['ru', 'Charges & rules']];
   let html = (state.error ? `<div class="err">${esc(state.error)}</div>` : '') + `<div class="verdict"><h2>Parking near ${esc(dest.label.split(',')[0])}</h2>
     <div class="where">${arrive.toLocaleString('en-GB', {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})} for ${durLabel(+$('#stay').value)}${dest.borough ? ' · ' + esc(dest.borough) : ''}</div>
     <ul>${v.map(([c, t]) => `<li class="${c}">${t}</li>`).join('')}</ul></div>
@@ -583,7 +600,7 @@ function render(fit){
 
   const parkCard = o => `<div class="card" id="c${esc(o.id)}" data-id="${esc(o.id)}"><div class="top"><h3>${esc(o.name)}</h3><span class="dist">${distLabel(o.d)}</span></div>
     <span class="badge ${o.level}">${esc(o.head)}</span>
-    <ul class="facts">${o.facts.map(([k, val]) => `<li><b>${k}:</b> ${esc(val)}</li>`).join('')}${o.name !== o.kind ? `<li><b>Type:</b> ${o.kind}${o.src === 'TfL' ? ' · TfL data' : ''}</li>` : ''}</ul>
+    <ul class="facts">${o.level === 'unknown' ? '<li>Unnamed and untagged — typically belongs to flats, a school or a business.</li>' : o.facts.map(([k, val]) => `<li><b>${k}:</b> ${esc(val)}</li>`).join('')}${o.name !== o.kind ? `<li><b>Type:</b> ${o.kind}${o.src === 'TfL' ? ' · TfL data' : ''}</li>` : ''}</ul>
     <div class="links"><a href="${gmNav(o.pos)}" target="_blank" rel="noopener">Navigate here</a><a href="${gmSV(o.pos)}" target="_blank" rel="noopener">Street View</a>${o.website && /^https?:/.test(o.website) ? `<a href="${esc(o.website)}" target="_blank" rel="noopener">Website</a>` : ''}</div></div>`;
 
   if (state.tab === 'cp'){
@@ -601,7 +618,8 @@ function render(fit){
         <span class="badge warn">Type not recorded — could be pay, permit or loading bays</span>
         <ul class="facts"><li>Shown as amber dots on the map. In central London most are pay-by-phone or residents' bays during zone hours.</li></ul>
         <div class="links">${plain.slice(0, 4).map((b, i) => `<a href="${gmSV(b.pos)}" target="_blank" rel="noopener">Signs at bay ${i + 1} (${walk(b.d)} min)</a>`).join('')}</div></div>` : '');
-    if (!streets.length && !bays.length) html += '<div class="note">Nobody has mapped kerbside rules for streets in this area yet.</div>';
+    if (unmapped.length) html += `<h3 style="font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 2px 6px">Streets without mapped rules</h3>` + (streets.length ? '' : `<div class="note">Nobody has recorded kerbside rules for this area, so these are the nearby streets with what is typical for each kind of road — not confirmed. Open Street View to read the actual signs${dest.borough ? ', and check ' + esc(dest.borough) + "'s parking zone hours in Charges &amp; rules" : ''}.</div>`)
+      + unmapped.slice(0, 30).map(g => `<div class="card" id="c${g.id}" data-id="${g.id}"><div class="top"><h3>${esc(g.name)}</h3><span class="dist">${distLabel(g.d)}</span></div><span class="badge unknown">${UN[g.kind]}</span><div class="links"><a href="${gmSV(g.near)}" target="_blank" rel="noopener">See the signs in Street View</a><a href="${gmNav(g.near)}" target="_blank" rel="noopener">Navigate here</a></div></div>`).join('');
     html += '<div class="note"><b>Streets not listed are unmapped, not unrestricted.</b> Kerbside rules come from OpenStreetMap volunteers and can be incomplete or out of date. The sign on the street always wins — use the Street View link to read it before you go.</div>';
   } else {
     const bq = dest.borough ? `https://www.google.com/search?q=${encodeURIComponent(dest.borough + ' council controlled parking zone hours map')}` : null;
@@ -632,6 +650,12 @@ function render(fit){
       .bindPopup(`<b>${esc(g.name)}</b> · ${s.where}<br>${esc(s.head)}${s.facts.length ? '<br><span style="color:#5b6876">' + s.facts.map(esc).join('<br>') + '</span>' : ''}`);
     line.on('click', () => highlightCard(g.id, 'st'));
     if (!features[g.id] || seg === g.near) features[g.id] = {layer:line, pos:seg.pts[Math.floor(seg.pts.length/2)]};
+  }
+  for (const g of unmapped) for (const pts of g.lines){
+    const line = L.polyline(pts, {color:COLORS.unknown, weight:3, opacity:g.kind === 'res' ? .75 : .4, dashArray:'6 6'}).addTo(layer)
+      .bindPopup(`<b>${esc(g.name)}</b><br>${UN[g.kind]}<br><a href="${gmSV(g.near)}" target="_blank" rel="noopener">See the signs in Street View</a>`);
+    line.on('click', () => highlightCard(g.id, 'st'));
+    if (!features[g.id]) features[g.id] = {layer:line, pos:g.near};
   }
   for (const o of [...parks, ...bays]){
     if (o.geom && o.geom.length > 2) L.polygon(o.geom.map(g => [g.lat, g.lon]), {color:COLORS[o.level] === COLORS.ok ? '#0a56a8' : COLORS[o.level], weight:1.5, fillOpacity:.18, interactive:false}).addTo(layer);
